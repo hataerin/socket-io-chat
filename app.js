@@ -1,64 +1,80 @@
-var app = require('express')();
-var server = require('http').createServer(app);
-// http server를 socket.io server로 upgrade한다
-var io = require('socket.io')(server);
+const fs = require('fs') //Node.js 기본 내장 모듈 불러오기
+const express = require('express') // 설치한 express 모듈 불러오기 
+const socket = require('socket.io') //설치한 socket.io 모듈 불러오기
+const http = require('http') //Node.js 기본 내장 모듈 불러오기
 
-// localhost:3000으로 서버에 접속하면 클라이언트로 index.html을 전송한다
-app.get('/', function(req, res) {
-  res.sendFile(__dirname + '/index.html');
-});
+const app = express() //express 객체 생성
 
-// connection event handler
-// connection이 수립되면 event handler function의 인자로 socket인 들어온다
-io.on('connection', function(socket) {
+const server = http.createServer(app) //express http 서버 생성
+const io = socket(server) //생성된 서버를 socket.io에 바인딩
 
-  // 접속한 클라이언트의 정보가 수신되면
-  socket.on('login', function(data) {
-    console.log('Client logged-in:\n name:' + data.name + '\n userid: ' + data.userid);
+app.use('/css', express.static('./static/css'))
+app.use('/js', express.static('./static/js'))
 
-    // socket에 클라이언트 정보를 저장한다
-    socket.name = data.name;
-    socket.userid = data.userid;
+app.get('/', function(request, response) { //Get 방식으로 / 경로에 접속하면 실행 됨
+    
+    //fs 모듈을 사용하여 index.html파일을 읽고 클라이언트로 읽은 내용을 전달
+    fs.readFile('./static/index.html', function(err, data){
+        if(err) {
+            response.send('에러')
+        } else {
+            response.writeHead(200, {'Content-type':'text/html'}) //헤더에 html파일이라는것을 작성하여 보내줌
+            response.write(data) //html 데이터를 보내줌
+            response.end() //모두 보냈으면 완료됐음을 알림
+        }
+    })
 
-    // 접속된 모든 클라이언트에게 메시지를 전송한다
-    io.emit('login', data.name );
-  });
+  //console.log('유저가 / 으로 접속하였습니다!')
+  //response.send('Hello, Express Server!!') //클라이언트로 문자열 응답
+})
 
-  // 클라이언트로부터의 메시지가 수신되면
-  socket.on('chat', function(data) {
-    console.log('Message from %s: %s', socket.name, data.msg);
+/*
+    io.sockets : 접속되는 모든 소켓들을 의미
+    on() : 소켓에서 해당 이벤트를 받으면 콜백함수가 실행
+*/
+io.sockets.on('connection', function(socket) { //connection 이라는 이벤트가 발생할 경우 콜백함수가 실행
+    console.log('유저 접속 됨')
 
-    var msg = {
-      from: {
-        name: socket.name,
-        userid: socket.userid
-      },
-      msg: data.msg
-    };
+    /*새로운 유저가 접속했을 경우 다른 소켓에게도 알려줌*/
+    socket.on('newUser', function(name) {
+        console.log(name + '님이 접속하였습니다.')
 
-    // 메시지를 전송한 클라이언트를 제외한 모든 클라이언트에게 메시지를 전송한다
-    socket.broadcast.emit('chat', msg);
+        //소켓에 이름 저장해두기
+        socket.name = name 
 
-    // 메시지를 전송한 클라이언트에게만 메시지를 전송한다
-    // socket.emit('s2c chat', msg);
+        //모든 소켓에게 전송
+        io.sockets.emit('update', {type: 'connect', name:'SERVER', message: name + '님이 접속하였습니다.'})
+    })
 
-    // 접속된 모든 클라이언트에게 메시지를 전송한다
-    // io.emit('s2c chat', msg);
+    /*전송한 메시지 받기*/
+    socket.on('message', function(data) {
 
-    // 특정 클라이언트에게만 메시지를 전송한다
-    // io.to(id).emit('s2c chat', data);
-  });
+        //받은 데이터에 누가 보냈는지 이름을 추가
+        data.name = socket.name
 
-  // force client disconnect from server
-  socket.on('forceDisconnect', function() {
-    socket.disconnect();
+        console.log(data)
+
+        //보낸 사람을 제외한 나머지 유저에게 메시지 전송
+        socket.broadcast.emit('update', data);
+    })
+
+    /*접속 종료 */
+    socket.on('disconnect', function() {
+        console.log(socket.name + '님이 나가셨습니다.')
+
+        //나가는 사람을 제외한 나머지 유저에게 메세지 전송
+        socket.broadcast.emit('update', {type: 'disconnect', name: 'SERVER', message: socket.name + '님이 나가셨습니다.'});
+    })
+  
+    socket.on('send', function(data) { // send라는 이벤트를 받을 경우 호출
+      console.log('전달된 메시지:', data.msg)
+    })
+  
+    socket.on('disconnect', function() { //socket.io기본 이벤트 : 연결되어있던 소켓과 접속이 끊어지면 자동으로 실행
+      console.log('접속 종료')
+    })
   })
-
-  socket.on('disconnect', function() {
-    console.log('user disconnected: ' + socket.name);
-  });
-});
-
-server.listen(3000, function() {
-  console.log('Socket IO server listening on port 3000');
-});
+  
+server.listen(8080, function() { //서버를 8080 포트로 listen
+  console.log('서버 실행 중..')
+})
